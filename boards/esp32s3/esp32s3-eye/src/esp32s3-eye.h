@@ -168,7 +168,7 @@ void board_lcd_uninitialize(void);
 #endif
 
 #ifdef CONFIG_ESP32S3_CAM
-int board_ov2640_initialize(void);
+int board_camera_initialize(void);
 #endif
 
 /****************************************************************************

@@ -8,23 +8,56 @@
  *
  ****************************************************************************/
 
-#include "esp32s3_i2c.h"
-#include <errno.h>
-#include <nuttx/arch.h>
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
 #include <nuttx/config.h>
-#include <nuttx/i2c/i2c_master.h>
+
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include <syslog.h>
+
+#include <nuttx/arch.h>
+#include <nuttx/i2c/i2c_master.h>
+#include <nuttx/timers/pwm.h>
+#include <nuttx/video/imgdata.h>
+#include <nuttx/video/imgsensor.h>
+#include <nuttx/video/v4l2_cap.h>
+#include <sys/videoio.h>
+
+#include "esp32s3-eye.h"
+#include "esp32s3_cam.h"
+#include "esp32s3_gpio.h"
+#include "esp32s3_i2c.h"
+#include "esp32s3_ledc.h"
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
 
 #define OV2640_I2C_ADDR 0x30
 #define OV2640_I2C_BUS 0
 #define OV2640_I2C_FREQ 100000
 
+#define QVGA_WIDTH 320
+#define QVGA_HEIGHT 240
+#define RGB565_BPP 2
+
+/****************************************************************************
+ * Private Types
+ ****************************************************************************/
+
 struct ov2640_regval_s {
     uint8_t reg;
     uint8_t val;
 };
+
+/****************************************************************************
+ * Private Data - OV2640 Register Tables
+ ****************************************************************************/
 
 /* Phase 1: Soft reset */
 
@@ -132,10 +165,9 @@ static const struct ov2640_regval_s g_ov2640_cif_base[] = {
     { 0x05, 0x00 }, /* R_BYPASS: DSP_EN */
 };
 
-/* Phase 3: CIF mode transition (from ESP-IDF ov2640_settings_to_cif) */
+/* Phase 3: CIF mode transition */
 
 static const struct ov2640_regval_s g_ov2640_to_cif[] = {
-    /* Sensor bank: CIF mode */
     { 0xff, 0x01 },
     { 0x12, 0x20 }, /* COM7: CIF */
     { 0x03, 0x0a }, /* COM1 */
@@ -152,21 +184,18 @@ static const struct ov2640_regval_s g_ov2640_to_cif[] = {
     { 0x37, 0xc3 }, { 0x23, 0x00 }, { 0x34, 0xc0 },
     { 0x06, 0x88 }, { 0x07, 0xc0 }, { 0x0d, 0x87 },
     { 0x0e, 0x41 }, { 0x4c, 0x00 },
-    /* DSP bank: set resolution and window */
     { 0xff, 0x00 },
     { 0xe0, 0x04 }, /* RESET: DVP reset */
-    /* Sensor resolution for DSP input */
-    { 0xc0, 0x32 }, /* HSIZE8: 50*4=200 (CIF) */
-    { 0xc1, 0x25 }, /* VSIZE8: 37*4=148 (CIF) */
+    { 0xc0, 0x32 }, /* HSIZE8 */
+    { 0xc1, 0x25 }, /* VSIZE8 */
     { 0x8c, 0x00 }, /* SIZEL */
-    /* Image window size >= output size */
-    { 0x51, 0x64 }, /* HSIZE: 100*4=400 */
-    { 0x52, 0x4a }, /* VSIZE: 74*4=296 */
+    { 0x51, 0x64 }, /* HSIZE */
+    { 0x52, 0x4a }, /* VSIZE */
     { 0x53, 0x00 }, /* XOFFL */
     { 0x54, 0x00 }, /* YOFFL */
     { 0x55, 0x00 }, /* VHYX */
     { 0x57, 0x00 }, /* TEST */
-    { 0x86, 0x3d }, /* CTRL2: DCW_EN | 0x1D */
+    { 0x86, 0x3d }, /* CTRL2: DCW_EN */
     { 0x50, 0x80 }, /* CTRLI: LP_DP */
 };
 
@@ -195,7 +224,7 @@ static const struct ov2640_regval_s g_ov2640_dsp_en[] = {
     { 0x05, 0x00 }, /* R_BYPASS: DSP_EN */
 };
 
-/* Phase 7: RGB565 output (from ESP-IDF ov2640_settings_rgb565) */
+/* Phase 7: RGB565 output */
 
 static const struct ov2640_regval_s g_ov2640_rgb565[] = {
     { 0xff, 0x00 },
@@ -205,6 +234,113 @@ static const struct ov2640_regval_s g_ov2640_rgb565[] = {
     { 0xe1, 0x77 },
     { 0xe0, 0x00 }, /* RESET: enable all */
 };
+
+/****************************************************************************
+ * Private Data - V4L2 Format Descriptors
+ ****************************************************************************/
+
+static const struct v4l2_fmtdesc g_fmtdesc = {
+    .index = 0,
+    .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+    .flags = 0,
+    .description = "RGB565",
+    .pixelformat = V4L2_PIX_FMT_RGB565,
+};
+
+static const struct v4l2_frmsizeenum g_frmsize = {
+    .index = 0,
+    .buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+    .pixel_format = V4L2_PIX_FMT_RGB565,
+    .type = V4L2_FRMSIZE_TYPE_DISCRETE,
+    .discrete = {
+        .width = QVGA_WIDTH,
+        .height = QVGA_HEIGHT,
+    },
+};
+
+static const struct v4l2_frmivalenum g_frminterval = {
+    .index = 0,
+    .buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+    .pixel_format = V4L2_PIX_FMT_RGB565,
+    .width = QVGA_WIDTH,
+    .height = QVGA_HEIGHT,
+    .type = V4L2_FRMIVAL_TYPE_DISCRETE,
+    .discrete = {
+        .numerator = 1,
+        .denominator = 15,
+    },
+};
+
+/****************************************************************************
+ * Private Function Prototypes
+ ****************************************************************************/
+
+/* OV2640 I2C helpers */
+
+static int ov2640_write_reg(FAR struct i2c_master_s* i2c,
+    uint8_t reg, uint8_t val);
+static int ov2640_write_reglist(FAR struct i2c_master_s* i2c,
+    FAR const struct ov2640_regval_s* regs,
+    size_t nregs);
+
+/* imgsensor ops */
+
+static bool ov2640_is_available(FAR struct imgsensor_s* sensor);
+static int ov2640_init(FAR struct imgsensor_s* sensor);
+static int ov2640_uninit(FAR struct imgsensor_s* sensor);
+static FAR const char* ov2640_get_driver_name(
+    FAR struct imgsensor_s* sensor);
+static int ov2640_validate(FAR struct imgsensor_s* sensor,
+    imgsensor_stream_type_t type,
+    uint8_t nr_datafmts,
+    FAR imgsensor_format_t* datafmts,
+    FAR imgsensor_interval_t* interval);
+static int ov2640_start_capture(FAR struct imgsensor_s* sensor,
+    imgsensor_stream_type_t type,
+    uint8_t nr_datafmts,
+    FAR imgsensor_format_t* datafmts,
+    FAR imgsensor_interval_t* interval);
+static int ov2640_stop_capture(FAR struct imgsensor_s* sensor,
+    imgsensor_stream_type_t type);
+
+/****************************************************************************
+ * Private Data - Ops Tables
+ ****************************************************************************/
+
+static const struct imgsensor_ops_s g_ov2640_sensor_ops = {
+    .is_available = ov2640_is_available,
+    .init = ov2640_init,
+    .uninit = ov2640_uninit,
+    .get_driver_name = ov2640_get_driver_name,
+    .validate_frame_setting = ov2640_validate,
+    .start_capture = ov2640_start_capture,
+    .stop_capture = ov2640_stop_capture,
+    .get_frame_interval = NULL,
+    .get_supported_value = NULL,
+    .get_value = NULL,
+    .set_value = NULL,
+};
+
+/****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+struct imgsensor_s g_ov2640_sensor = {
+    .ops = &g_ov2640_sensor_ops,
+    .fmtdescs_num = 1,
+    .fmtdescs = &g_fmtdesc,
+    .frmsizes_num = 1,
+    .frmsizes = &g_frmsize,
+    .frmintervals_num = 1,
+    .frmintervals = &g_frminterval,
+};
+
+/****************************************************************************
+ * Private Functions - OV2640 I2C Helpers
+ ****************************************************************************/
+
+#define WRITE_REGS(i2c, arr) \
+    ov2640_write_reglist(i2c, arr, sizeof(arr) / sizeof(arr[0]))
 
 static int ov2640_write_reg(FAR struct i2c_master_s* i2c,
     uint8_t reg, uint8_t val)
@@ -227,7 +363,9 @@ static int ov2640_write_reglist(FAR struct i2c_master_s* i2c,
     FAR const struct ov2640_regval_s* regs,
     size_t nregs)
 {
-    for (size_t i = 0; i < nregs; i++) {
+    size_t i;
+
+    for (i = 0; i < nregs; i++) {
         int ret = ov2640_write_reg(i2c, regs[i].reg, regs[i].val);
         if (ret < 0) {
             syslog(LOG_ERR, "OV2640 write 0x%02x=0x%02x failed: %d\n",
@@ -239,13 +377,43 @@ static int ov2640_write_reglist(FAR struct i2c_master_s* i2c,
     return OK;
 }
 
-#define WRITE_REGS(i2c, arr) \
-    ov2640_write_reglist(i2c, arr, sizeof(arr) / sizeof(arr[0]))
+/****************************************************************************
+ * Private Functions - imgsensor ops (OV2640 sensor control)
+ ****************************************************************************/
 
-int board_ov2640_initialize(void)
+static bool ov2640_is_available(FAR struct imgsensor_s* sensor)
+{
+    return true;
+}
+
+static void ov2640_start_xclk(void)
+{
+    FAR struct pwm_lowerhalf_s *pwm;
+    struct pwm_info_s info;
+
+    pwm = esp32s3_ledc_init(0);
+    if (pwm == NULL) {
+        syslog(LOG_ERR, "CAM: LEDC init failed\n");
+        return;
+    }
+
+    pwm->ops->setup(pwm);
+
+    info.frequency = 20000000;
+    info.duty = (ub16_t)(65536 / 2);
+
+    pwm->ops->start(pwm, &info);
+    syslog(LOG_INFO, "CAM: LEDC XCLK 20MHz started on GPIO15\n");
+}
+
+static int ov2640_init(FAR struct imgsensor_s* sensor)
 {
     FAR struct i2c_master_s* i2c;
     int ret;
+
+    ov2640_start_xclk();
+    syslog(LOG_INFO, "CAM: LEDC XCLK started on GPIO15\n");
+    up_mdelay(50);
 
     i2c = esp32s3_i2cbus_initialize(OV2640_I2C_BUS);
     if (i2c == NULL) {
@@ -255,47 +423,131 @@ int board_ov2640_initialize(void)
     /* 1. Soft reset */
 
     ret = WRITE_REGS(i2c, g_ov2640_reset);
-    if (ret < 0)
+    if (ret < 0) {
         return ret;
+    }
+
     up_mdelay(10);
 
     /* 2. CIF base config (full sensor + DSP init) */
 
     ret = WRITE_REGS(i2c, g_ov2640_cif_base);
-    if (ret < 0)
+    if (ret < 0) {
         return ret;
+    }
 
     /* 3. CIF mode transition (DSP window + CTRL2/CTRLI) */
 
     ret = WRITE_REGS(i2c, g_ov2640_to_cif);
-    if (ret < 0)
+    if (ret < 0) {
         return ret;
+    }
 
     /* 4. QVGA zoom window */
 
     ret = WRITE_REGS(i2c, g_ov2640_qvga_window);
-    if (ret < 0)
+    if (ret < 0) {
         return ret;
+    }
 
     /* 5. Clock config */
 
     ret = WRITE_REGS(i2c, g_ov2640_clock);
-    if (ret < 0)
+    if (ret < 0) {
         return ret;
+    }
 
     /* 6. Enable DSP */
 
     ret = WRITE_REGS(i2c, g_ov2640_dsp_en);
-    if (ret < 0)
+    if (ret < 0) {
         return ret;
+    }
+
     up_mdelay(10);
 
     /* 7. RGB565 output format */
 
     ret = WRITE_REGS(i2c, g_ov2640_rgb565);
-    if (ret < 0)
+    if (ret < 0) {
         return ret;
+    }
 
     syslog(LOG_INFO, "OV2640 sensor configured for QVGA RGB565\n");
+    return OK;
+}
+
+static int ov2640_uninit(FAR struct imgsensor_s* sensor)
+{
+    return OK;
+}
+
+static FAR const char* ov2640_get_driver_name(
+    FAR struct imgsensor_s* sensor)
+{
+    return "OV2640";
+}
+
+static int ov2640_validate(FAR struct imgsensor_s* sensor,
+    imgsensor_stream_type_t type,
+    uint8_t nr_datafmts,
+    FAR imgsensor_format_t* datafmts,
+    FAR imgsensor_interval_t* interval)
+{
+    return OK;
+}
+
+static int ov2640_start_capture(FAR struct imgsensor_s* sensor,
+    imgsensor_stream_type_t type,
+    uint8_t nr_datafmts,
+    FAR imgsensor_format_t* datafmts,
+    FAR imgsensor_interval_t* interval)
+{
+    /* Sensor is always streaming after init, nothing to do */
+
+    return OK;
+}
+
+static int ov2640_stop_capture(FAR struct imgsensor_s* sensor,
+    imgsensor_stream_type_t type)
+{
+    return OK;
+}
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: board_camera_initialize
+ *
+ * Description:
+ *   Initialize the camera subsystem: upstream CAM imgdata driver +
+ *   OV2640 imgsensor, then register the V4L2 capture device.
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno on failure.
+ *
+ ****************************************************************************/
+
+int board_camera_initialize(void)
+{
+    FAR struct imgdata_s* imgdata;
+
+    syslog(LOG_INFO, "CAM: board_camera_initialize start\n");
+
+    imgdata = esp32s3_cam_initialize();
+    if (imgdata == NULL) {
+        syslog(LOG_ERR, "ERROR: esp32s3_cam_initialize failed\n");
+        return -ENODEV;
+    }
+
+    ov2640_start_xclk();
+    syslog(LOG_INFO, "CAM: LEDC XCLK started\n");
+
+    imgdata_register(imgdata);
+    imgsensor_register(&g_ov2640_sensor);
+
+    syslog(LOG_INFO, "CAM: imgdata + imgsensor registered\n");
     return OK;
 }

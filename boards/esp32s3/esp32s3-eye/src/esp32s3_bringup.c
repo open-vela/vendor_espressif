@@ -84,7 +84,6 @@
 #endif
 
 #ifdef CONFIG_ESP32S3_CAM
-#include "esp32s3_camera.h"
 #endif
 
 #include "esp32s3-eye.h"
@@ -244,36 +243,11 @@ int esp32s3_bringup(void)
 #endif
 
 #ifdef CONFIG_ESP32S3_CAM
-    {
-        static const struct esp32s3_cam_config_s cam_config = {
-            .xclk_pin = ESP32S3_EYE_CAM_XCLK,
-            .pclk_pin = ESP32S3_EYE_CAM_PCLK,
-            .vsync_pin = ESP32S3_EYE_CAM_VSYNC,
-            .href_pin = ESP32S3_EYE_CAM_HREF,
-            .data_pins = {
-                ESP32S3_EYE_CAM_D0, ESP32S3_EYE_CAM_D1,
-                ESP32S3_EYE_CAM_D2, ESP32S3_EYE_CAM_D3,
-                ESP32S3_EYE_CAM_D4, ESP32S3_EYE_CAM_D5,
-                ESP32S3_EYE_CAM_D6, ESP32S3_EYE_CAM_D7 },
-            .xclk_freq = ESP32S3_EYE_CAM_XCLK_FREQ,
-            .width = 320,
-            .height = 240,
-            .bpp = 2
-        };
-
-        ret = esp32s3_cam_initialize(&cam_config);
-        if (ret < 0) {
-            syslog(LOG_ERR, "ERROR: Failed to initialize camera: %d\n", ret);
-        } else {
-
-            ret = board_ov2640_initialize();
-            if (ret < 0) {
-                syslog(LOG_ERR, "ERROR: Failed to initialize OV2640: %d\n", ret);
-            } else {
-                syslog(LOG_INFO, "OV2640 sensor configured for QVGA RGB565\n");
-            }
-        }
-    }
+    ret = board_camera_initialize();
+    if (ret < 0)
+      {
+        syslog(LOG_ERR, "ERROR: board_camera_initialize failed: %d\n", ret);
+      }
 #endif
 
     /* If we got here then perhaps not all initialization was successful, but
