@@ -138,7 +138,7 @@ nsh> uname -a
 NuttX  0.0.0 <commit> <date> xtensa esp32s3-eye
 nsh> ls /dev
 /dev:
- accel0   audio/   buttons   console   i2c0   mmcsd1
+ accel0   audio/   buttons   console   i2c0   lcd0   mmcsd1
  null     random   timer0    ttyACM0   userleds   video0   zero
 ```
 
@@ -192,17 +192,16 @@ path to `build.sh`.
 
 ## Known Limitations
 
-1. `fb` builtin app prints `Failed to open /dev/fb0: 2`; the ST7789 panel
-   is registered as `/dev/lcd0`, not as a framebuffer. Use `lvgldemo`
-   instead.
-2. `bt bnep0 scan get` may hard-fault under some peer mixes — upstream
+1. `bt bnep0 scan get` may hard-fault under some peer mixes — upstream
    NuttX BLE-GATT ENOTCONN issue traced to LE Privacy. HCI connect /
    pairing are unaffected; a fix is being prepared as a separate upstream
    PR.
-3. `/dev/uorb` is empty — the QMA7981 driver registers as `/dev/accel0`
+2. `/dev/uorb` is empty — the QMA7981 driver registers as `/dev/accel0`
    for now; uORB integration is queued for v2.
-4. microSD is locked to 1-bit SDIO; 4-bit support is on the follow-up
+3. microSD is locked to 1-bit SDIO; 4-bit support is on the follow-up
    list.
+4. The ST7789 LCD has no touch hardware on this board; `lvgldemo` runs but
+   `/dev/input0` (touch) returns ENOENT, which is expected.
 
 ## License
 
