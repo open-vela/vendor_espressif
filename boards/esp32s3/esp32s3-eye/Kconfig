@@ -3,17 +3,20 @@
 # see the file kconfig-language.txt in the NuttX tools repository.
 #
 
-if ARCH_BOARD_ESP32S3_EYE
+if ARCH_BOARD_CUSTOM
 
 config ESP32S3_EYE_LCD
-	bool "Enable ESP32-S3 LCD"
-	default n
+	bool "Enable ESP32-S3-EYE LCD"
+	default y
 	select ESP32S3_SPI2
+	select SPI
 	select SPI_CMDDATA
+	select SPI_EXCHANGE
 	select LCD
 	select LCD_DEV
 	select LCD_ST7789
+	select LCD_FRAMEBUFFER
 	---help---
-		Enable board LCD support, IC is LCD_ST7789V.
+		Enable board LCD support, IC is ST7789V.
 
-endif # ARCH_BOARD_ESP32S3_EYE
+endif # ARCH_BOARD_CUSTOM

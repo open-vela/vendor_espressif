@@ -134,7 +134,7 @@ nsh> uname -a
 NuttX  0.0.0 <commit> <date> xtensa esp32s3-eye
 nsh> ls /dev
 /dev:
- accel0   audio/   buttons   console   i2c0   mmcsd1
+ accel0   audio/   buttons   console   i2c0   lcd0   mmcsd1
  null     random   timer0    ttyACM0   userleds   video0   zero
 ```
 
@@ -187,14 +187,14 @@ cp defconfig \
 
 ## 已知限制
 
-1. `fb` builtin 报 `Failed to open /dev/fb0: 2`；ST7789 注册为
-   `/dev/lcd0` 而不是 framebuffer，请改用 `lvgldemo`。
-2. `bt bnep0 scan get` 在某些 peer 组合下可能 hard-fault —— 这是上游
+1. `bt bnep0 scan get` 在某些 peer 组合下可能 hard-fault —— 这是上游
    NuttX BLE-GATT ENOTCONN 问题，根因是 LE Privacy 处理。HCI 连接 /
    配对不受影响，修复将作为独立的上游 PR 提交。
-3. `/dev/uorb` 暂为空 —— QMA7981 当前直接注册为 `/dev/accel0`，
+2. `/dev/uorb` 暂为空 —— QMA7981 当前直接注册为 `/dev/accel0`，
    uORB 集成排在 v2。
-4. microSD 锁定 1-bit SDIO 模式；4-bit 支持在后续补丁中。
+3. microSD 锁定 1-bit SDIO 模式；4-bit 支持在后续补丁中。
+4. 该板没有触摸硬件；`lvgldemo` 能正常显示，但 `/dev/input0`（触摸屏）
+   返回 ENOENT，属预期行为。
 
 ## 许可协议
 
