@@ -12,12 +12,6 @@
 
 - [ESP32-S3-EYE 上手指南（esp-who）](https://github.com/espressif/esp-who/blob/master/docs/en/get-started/ESP32-S3-EYE_Getting_Started_Guide.md)
 
-> ⚠️ **分支依赖**
->
-> 本板适配仅在 `open-vela/nuttx` 与 `open-vela/vendor_espressif` 的
-> `dev-ai-contest-2026` 分支上可编译。`trunk` 或 `dev` 分支由于尚未合入
-> 芯片层依赖，无法编译。
-
 ## 目录结构
 
 ```
@@ -184,17 +178,6 @@ cp defconfig \
   `xtensa-esp32s3-elf-gdb nuttx/nuttx -ex 'target remote :3333'`。
 - **崩溃分析** —— 保存完整的寄存器 / 堆栈 dump，喂给
   `tools/scripts/decode_backtrace.py` 和 `nuttx/nuttx`。
-
-## 已知限制
-
-1. `bt bnep0 scan get` 在某些 peer 组合下可能 hard-fault —— 这是上游
-   NuttX BLE-GATT ENOTCONN 问题，根因是 LE Privacy 处理。HCI 连接 /
-   配对不受影响，修复将作为独立的上游 PR 提交。
-2. `/dev/uorb` 暂为空 —— QMA7981 当前直接注册为 `/dev/accel0`，
-   uORB 集成排在 v2。
-3. microSD 锁定 1-bit SDIO 模式；4-bit 支持在后续补丁中。
-4. 该板没有触摸硬件；`lvgldemo` 能正常显示，但 `/dev/input0`（触摸屏）
-   返回 ENOENT，属预期行为。
 
 ## 许可协议
 

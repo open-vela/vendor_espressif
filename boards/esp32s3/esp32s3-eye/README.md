@@ -13,13 +13,6 @@ guide, see the upstream Espressif documentation:
 - [ESP32-S3-EYE product page](https://www.espressif.com/en/news/ESP32-S3-EYE)
 - [ESP32-S3-EYE Getting Started Guide (esp-who)](https://github.com/espressif/esp-who/blob/master/docs/en/get-started/ESP32-S3-EYE_Getting_Started_Guide.md)
 
-> ⚠️ **Branch dependency**
->
-> This board overlay only builds on the `dev-ai-contest-2026` branch of
-> `open-vela/nuttx` and `open-vela/vendor_espressif`. Building it from
-> `trunk` or `dev` will fail because the chip-side dependencies are not
-> yet upstream.
-
 ## Directory Structure
 
 ```
@@ -189,19 +182,6 @@ path to `build.sh`.
   `xtensa-esp32s3-elf-gdb nuttx/nuttx -ex 'target remote :3333'`.
 - **Crash analysis** — save the full register/stack dump and feed it to
   `tools/scripts/decode_backtrace.py` together with `nuttx/nuttx`.
-
-## Known Limitations
-
-1. `bt bnep0 scan get` may hard-fault under some peer mixes — upstream
-   NuttX BLE-GATT ENOTCONN issue traced to LE Privacy. HCI connect /
-   pairing are unaffected; a fix is being prepared as a separate upstream
-   PR.
-2. `/dev/uorb` is empty — the QMA7981 driver registers as `/dev/accel0`
-   for now; uORB integration is queued for v2.
-3. microSD is locked to 1-bit SDIO; 4-bit support is on the follow-up
-   list.
-4. The ST7789 LCD has no touch hardware on this board; `lvgldemo` runs but
-   `/dev/input0` (touch) returns ENOENT, which is expected.
 
 ## License
 
